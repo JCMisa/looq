@@ -5,6 +5,7 @@ export default function Home() {
     <div>
       LOOQ
       <ThemeToggler />
+      <p>Updated Environment Variable</p>
     </div>
   );
 }
