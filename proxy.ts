@@ -11,7 +11,7 @@ const isPublicRoute = createRouteMatcher([
 const isOnboardingRoute = createRouteMatcher(["/onboarding"]);
 
 export default clerkMiddleware(async (auth, req) => {
-  const { userId, sessionClaims, redirectToSignIn } = await auth();
+  const { userId, sessionClaims, orgId, redirectToSignIn } = await auth();
 
   // 1. If not logged in and trying to access a private route, force sign-in
   if (!userId && !isPublicRoute(req)) {
@@ -22,14 +22,22 @@ export default clerkMiddleware(async (auth, req) => {
   if (userId && !isPublicRoute(req)) {
     const universityId = sessionClaims?.metadata?.university_id;
 
-    // If they have no university and aren't already on the onboarding page, send them there
-    if (!universityId && !isOnboardingRoute(req)) {
+    /**
+     * BRIDGING THE GAP:
+     * If 'universityId' exists in metadata (from your DB), they are good.
+     * If 'orgId' exists, they just created/joined a Clerk Org (Admin/Teacher),
+     * so we trust they are onboarded even if the webhook metadata hasn't synced to the cookie yet.
+     */
+    const isUserOnboarded = !!universityId || !!orgId;
+
+    // If they aren't onboarded and aren't already on the onboarding page, send them there
+    if (!isUserOnboarded && !isOnboardingRoute(req)) {
       const onboardingUrl = new URL("/onboarding", req.url);
       return NextResponse.redirect(onboardingUrl);
     }
 
-    // If they HAVE a university but are trying to go to onboarding, send them to dashboard
-    if (universityId && isOnboardingRoute(req)) {
+    // If they ARE onboarded but are trying to go to onboarding, send them to dashboard
+    if (isUserOnboarded && isOnboardingRoute(req)) {
       const dashboardUrl = new URL("/dashboard", req.url);
       return NextResponse.redirect(dashboardUrl);
     }
@@ -38,7 +46,9 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
+    // Skip Next.js internals and all static files
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Always run for API routes
     "/(api|trpc)(.*)",
   ],
 };
