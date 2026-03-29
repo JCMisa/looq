@@ -13,6 +13,9 @@ const isOnboardingRoute = createRouteMatcher(["/onboarding"]);
 export default clerkMiddleware(async (auth, req) => {
   const { userId, sessionClaims, orgId, redirectToSignIn } = await auth();
 
+  const url = new URL(req.url);
+  const isSyncing = url.searchParams.get("sync") === "true"; // Check for our flag
+
   // 1. If not logged in and trying to access a private route, force sign-in
   if (!userId && !isPublicRoute(req)) {
     return redirectToSignIn({ returnBackUrl: req.url });
@@ -28,7 +31,7 @@ export default clerkMiddleware(async (auth, req) => {
      * If 'orgId' exists, they just created/joined a Clerk Org (Admin/Teacher),
      * so we trust they are onboarded even if the webhook metadata hasn't synced to the cookie yet.
      */
-    const isUserOnboarded = !!universityId || !!orgId;
+    const isUserOnboarded = !!universityId || !!orgId || isSyncing;
 
     // If they aren't onboarded and aren't already on the onboarding page, send them there
     if (!isUserOnboarded && !isOnboardingRoute(req)) {

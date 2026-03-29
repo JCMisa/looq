@@ -17,7 +17,7 @@ export function JoinUniversityForm() {
 
     if (result.success) {
       toast.success("Successfully joined the university!");
-      window.location.href = "/dashboard";
+      window.location.href = "/dashboard?sync=true";
     } else {
       toast.error(result.message);
     }
