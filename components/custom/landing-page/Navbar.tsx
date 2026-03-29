@@ -5,9 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
-import { useUserStore } from "@/store/userStore";
 import { useRouter } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, useUser } from "@clerk/nextjs";
 
 const navLinks = [
   { label: "Features", href: "#features" },
@@ -17,7 +16,7 @@ const navLinks = [
 ];
 
 export default function Navbar() {
-  const user = useUserStore((s) => s.userDetails);
+  const { user } = useUser();
 
   const router = useRouter();
 
@@ -81,7 +80,7 @@ export default function Navbar() {
                 <div className="flex flex-col">
                   <p className="text-sm">{user.fullName}</p>
                   <span className="text-xs text-muted-foreground">
-                    {user.email}
+                    {user.primaryEmailAddress?.emailAddress}
                   </span>
                 </div>
               </div>

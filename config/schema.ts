@@ -90,6 +90,7 @@ export const universities = pgTable("universities", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(), // Official name of the University
   slug: text("slug").unique().notNull(), // URL-friendly name (e.g., 'pup-main')
+  joinCode: text("join_code").unique().notNull(),
   clerkOrgId: text("clerk_org_id").unique().notNull(), // Links this row to a Clerk Organization
   subscriptionPlan: text("subscription_plan").default("FREE").notNull(), // Used for Clerk Billing (FREE vs PRO)
   createdAt: timestamp("created_at").defaultNow().notNull(),

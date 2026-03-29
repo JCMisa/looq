@@ -1,37 +1,30 @@
 import { Webhook } from "svix";
 import { headers } from "next/headers";
-import { WebhookEvent } from "@clerk/nextjs/server";
+import { WebhookEvent, createClerkClient } from "@clerk/nextjs/server";
 import { db } from "@/config/db";
-import { profiles } from "@/config/schema";
+import { profiles, universities } from "@/config/schema";
 import { eq } from "drizzle-orm";
 
 export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
+  const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
 
-  if (!WEBHOOK_SECRET) {
-    console.error("Missing CLERK_WEBHOOK_SECRET");
+  if (!WEBHOOK_SECRET || !CLERK_SECRET_KEY) {
+    console.error("Missing Clerk Secrets");
     return new Response("Server configuration error", { status: 500 });
   }
 
-  // Get headers
   const headerPayload = await headers();
   const svix_id = headerPayload.get("svix-id");
   const svix_timestamp = headerPayload.get("svix-timestamp");
   const svix_signature = headerPayload.get("svix-signature");
 
   if (!svix_id || !svix_timestamp || !svix_signature) {
-    console.error("Missing svix headers:", {
-      svix_id,
-      svix_timestamp,
-      svix_signature,
-    });
-    return new Response("Missing svix headers", { status: 400 });
+    return new Response("Error: Missing svix headers", { status: 400 });
   }
 
-  // Get and verify body
   const payload = await req.json();
   const body = JSON.stringify(payload);
-
   const wh = new Webhook(WEBHOOK_SECRET);
   let evt: WebhookEvent;
 
@@ -43,11 +36,11 @@ export async function POST(req: Request) {
     }) as WebhookEvent;
   } catch (err) {
     console.error("Webhook verification failed:", err);
-    return new Response("Invalid webhook signature", { status: 400 });
+    return new Response("Error: Verification failed", { status: 400 });
   }
 
   const eventType = evt.type;
-  console.log(`📩 Received webhook: ${eventType}`);
+  const clerk = createClerkClient({ secretKey: CLERK_SECRET_KEY });
 
   try {
     switch (eventType) {
@@ -55,73 +48,91 @@ export async function POST(req: Request) {
       case "user.updated": {
         const { id, email_addresses, image_url, first_name, last_name } =
           evt.data;
-
-        // Get primary email or null (don't create fake emails)
         const primaryEmail = email_addresses?.find(
-          (email) => email.id === email_addresses[0]?.id,
+          (e) => e.id === email_addresses[0]?.id,
         )?.email_address;
-
-        if (!primaryEmail && eventType === "user.created") {
-          console.error(`❌ User ${id} has no email address`);
-          // Still return 200 so Clerk doesn't retry, but log the error
-          return new Response("User has no email", { status: 200 });
-        }
-
         const fullName =
           `${first_name ?? ""} ${last_name ?? ""}`.trim() || "Anonymous User";
-
-        // For updates, only update email if provided
-        const updateData: Partial<typeof profiles.$inferInsert> = {
-          fullName: fullName,
-          imageUrl: image_url,
-        };
-
-        if (primaryEmail) {
-          updateData.email = primaryEmail;
-        }
 
         await db
           .insert(profiles)
           .values({
             id: id,
             fullName: fullName,
-            email: primaryEmail || `temp-${id}@placeholder.com`, // Temporary for insert
+            email: primaryEmail || `user-${id}@looq.edu`,
             imageUrl: image_url,
           })
           .onConflictDoUpdate({
             target: profiles.id,
-            set: updateData,
+            set: { fullName, imageUrl: image_url, email: primaryEmail },
           });
+        break;
+      }
 
-        console.log(
-          `✅ Profile: ${id} ${eventType === "user.created" ? "created" : "updated"}`,
-        );
+      case "organization.created": {
+        const { id, name, slug, created_by } = evt.data;
+        if (!created_by) break;
+
+        // Generate a clean 6-character alphanumeric join code
+        const generatedJoinCode = Math.random()
+          .toString(36)
+          .substring(2, 8)
+          .toUpperCase();
+
+        const [newUni] = await db
+          .insert(universities)
+          .values({
+            name: name,
+            slug: slug || name.toLowerCase().replace(/\s+/g, "-"),
+            clerkOrgId: id,
+            joinCode: generatedJoinCode,
+          })
+          .returning();
+
+        await db
+          .update(profiles)
+          .set({ universityId: newUni.id, role: "ORG_ADMIN" })
+          .where(eq(profiles.id, created_by));
+
+        await clerk.users.updateUserMetadata(created_by, {
+          publicMetadata: { university_id: newUni.id, role: "ORG_ADMIN" },
+        });
+        break;
+      }
+
+      case "organizationMembership.created": {
+        const { organization, public_user_data } = evt.data;
+        const userId = public_user_data.user_id;
+
+        const [uni] = await db
+          .select()
+          .from(universities)
+          .where(eq(universities.clerkOrgId, organization.id))
+          .limit(1);
+
+        if (uni) {
+          await db
+            .update(profiles)
+            .set({ universityId: uni.id, role: "TEACHER" })
+            .where(eq(profiles.id, userId));
+
+          await clerk.users.updateUserMetadata(userId, {
+            publicMetadata: { university_id: uni.id, role: "TEACHER" },
+          });
+        }
         break;
       }
 
       case "user.deleted": {
         const { id } = evt.data;
-
-        // Soft delete or hard delete - here we hard delete
         await db.delete(profiles).where(eq(profiles.id, id as string));
-        console.log(`🗑️ User ${id} deleted from database`);
         break;
       }
-
-      default:
-        console.log(`ℹ️ Unhandled event type: ${eventType}`);
     }
 
-    return new Response("Webhook processed successfully", { status: 200 });
+    return new Response("Webhook processed", { status: 200 });
   } catch (error) {
-    console.error("❌ Database operation failed:", error);
-    // Return 500 so Clerk will retry (webhooks should be idempotent)
-    return new Response(
-      JSON.stringify({
-        error: "Database operation failed",
-        details: String(error),
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
+    console.error("Webhook Error:", error);
+    return new Response("Database error", { status: 500 });
   }
 }

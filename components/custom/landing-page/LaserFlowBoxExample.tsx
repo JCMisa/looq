@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 export default function LaserFlowBoxExample() {
   const revealImgRef = useRef<HTMLImageElement>(null);
@@ -59,8 +60,10 @@ export default function LaserFlowBoxExample() {
           integrity.
         </p>
         <div className="flex gap-4 pointer-events-auto">
-          <Button size="lg" className="bg-primary hover:bg-primary/90">
-            Get Started <ArrowRight className="ml-2 h-4 w-4" />
+          <Button size="lg" className="bg-primary hover:bg-primary/90" asChild>
+            <Link href={"/dashboard"}>
+              Get Started <ArrowRight className="ml-2 h-4 w-4" />
+            </Link>
           </Button>
           <Button size="lg" variant="outline">
             Watch Demo
